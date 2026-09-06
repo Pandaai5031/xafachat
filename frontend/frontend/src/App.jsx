@@ -1,7 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import io from 'socket.io-client';
 
-const socket = io('http://localhost:5000');
+// Render serveringiz manzili va qayta ulanish sozlamalari
+const socket = io('https://xafachat.onrender.com', {
+  transports: ['websocket', 'polling']
+});
 
 export default function App() {
   const [auth, setAuth] = useState(false);
@@ -120,8 +123,8 @@ export default function App() {
       </header>
 
       <div style={{ flex: 1, padding: '20px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-        {chat.map((msg) => (
-          <div key={msg.id} style={{ alignSelf: msg.username === username ? 'flex-end' : 'flex-start', background: msg.username === username ? '#2563eb' : '#334155', padding: '10px 14px', borderRadius: '12px', maxWidth: '70%' }}>
+        {chat.map((msg, index) => (
+          <div key={msg.id || index} style={{ alignSelf: msg.username === username ? 'flex-end' : 'flex-start', background: msg.username === username ? '#2563eb' : '#334155', padding: '10px 14px', borderRadius: '12px', maxWidth: '70%' }}>
             <div style={{ fontSize: '11px', opacity: 0.7, marginBottom: '4px' }}>{msg.username} • {msg.time}</div>
             
             {msg.type === 'text' && <div>{msg.content}</div>}
