@@ -6,26 +6,22 @@ const mongoose = require('mongoose');
 
 const app = express();
 
-// CORS sozlamalari
 app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '50mb' }));
 
-// Health-check endpoint (Render server uxlamay turishi uchun)
 app.get('/', (req, res) => {
   res.send('XAFA Chat Backend is running live!');
 });
 
-// MongoDB Atlas ulanishi (Render Environment Variables dan oladi)
 const MONGO_URI = process.env.MONGO_URI || "mongodb+srv://madaliyevabror87_db_user:VhKvXdSKS3hxJsVF@cluster0.afuoudb.mongodb.net/xafaChatDB?retryWrites=true&w=majority";
 
 mongoose.connect(MONGO_URI)
-  .then(() => console.log('MongoDB Atlas-ga muvaffaqiyatli ulandi!'))
-  .catch((err) => console.error('MongoDB ulanishda xatolik:', err));
+  .then(() => console.log('MongoDB Atlas-ga ulandi!'))
+  .catch((err) => console.error('MongoDB xatosi:', err));
 
-// Xabarlar sxemasi
 const MessageSchema = new mongoose.Schema({
   username: String,
-  type: String, // text, image, video, audio
+  type: String,
   content: String,
   time: String,
   createdAt: { type: Date, default: Date.now }
@@ -34,20 +30,12 @@ const MessageSchema = new mongoose.Schema({
 const Message = mongoose.model('Message', MessageSchema);
 
 const server = http.createServer(app);
-
-// Socket.io sozlamalari
 const io = socketIo(server, {
-  cors: {
-    origin: '*',
-    methods: ['GET', 'POST']
-  },
-  maxHttpBufferSize: 1e8 // Buyuk hajmdagi fayllar (50MB+) uchun
+  cors: { origin: '*', methods: ['GET', 'POST'] },
+  maxHttpBufferSize: 1e8
 });
 
 io.on('connection', async (socket) => {
-  console.log('Yangi foydalanuvchi ulandi:', socket.id);
-
-  // Bazadan oxirgi 100 ta xabarni olish
   try {
     const history = await Message.find().sort({ createdAt: 1 }).limit(100);
     socket.emit('initMessages', history);
@@ -55,10 +43,9 @@ io.on('connection', async (socket) => {
     console.error('Xabarlarni yuklashda xatolik:', err);
   }
 
-  // Yangi xabar kelganda bazaga saqlash va hammaning ekraniga tarqatish
+  // Yangi xabar
   socket.on('sendMessage', async (data) => {
     const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    
     const newMsg = new Message({
       username: data.username,
       type: data.type,
@@ -70,12 +57,30 @@ io.on('connection', async (socket) => {
       await newMsg.save();
       io.emit('message', newMsg);
     } catch (err) {
-      console.error('Xabarni saqlashda xatolik:', err);
+      console.error('Xabarni saqlash xatosi:', err);
     }
   });
 
-  socket.on('disconnect', () => {
-    console.log('Foydalanuvchi uzildi:', socket.id);
+  // Xabarni tahrirlash
+  socket.on('editMessage', async ({ id, newContent }) => {
+    try {
+      const updated = await Message.findByIdAndUpdate(id, { content: newContent }, { new: true });
+      if (updated) {
+        io.emit('messageEdited', { id, newContent });
+      }
+    } catch (err) {
+      console.error('Tahrirlash xatosi:', err);
+    }
+  });
+
+  // Xabarni o'chirish
+  socket.on('deleteMessage', async (id) => {
+    try {
+      await Message.findByIdAndDelete(id);
+      io.emit('messageDeleted', id);
+    } catch (err) {
+      console.error("O'chirish xatosi:", err);
+    }
   });
 });
 
