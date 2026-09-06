@@ -98,7 +98,7 @@ export default function App() {
       mediaRecorderRef.current.start();
       setRecording(true);
     } catch (err) {
-      alert('Mikrofon ishlamadi yoki ruxsat berilmadi!');
+      alert('Mikrofon ishlamadi!');
     }
   };
 
@@ -115,7 +115,7 @@ export default function App() {
   };
 
   const saveEdit = (id) => {
-    if (editText.trim()) {
+    if (editText.trim() && id) {
       socket.emit('editMessage', { id, newContent: editText });
       setEditingId(null);
       setEditText('');
@@ -123,7 +123,7 @@ export default function App() {
   };
 
   const handleDelete = (id) => {
-    if (window.confirm("Xabarni o'chirmoqchimisiz?")) {
+    if (id && window.confirm("Xabarni o'chirmoqchimisiz?")) {
       socket.emit('deleteMessage', id);
     }
   };
@@ -174,13 +174,13 @@ export default function App() {
           {chat.map((msg) => {
             const isMe = msg.username === username;
             return (
-              <div key={msg._id || Math.random()} style={{ ...msgWrapperStyle, justifyContent: isMe ? 'flex-end' : 'flex-start' }}>
+              <div key={msg._id} style={{ ...msgWrapperStyle, justifyContent: isMe ? 'flex-end' : 'flex-start' }}>
                 <div style={{ ...msgBubbleStyle, background: isMe ? 'linear-gradient(135deg, #6c5ce7, #a29bfe)' : '#ffffff', color: isMe ? '#fff' : '#2d3436', borderRadius: isMe ? '18px 18px 4px 18px' : '18px 18px 18px 4px' }}>
                   
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', marginBottom: '4px' }}>
                     <span style={{ fontSize: '11px', fontWeight: '700', color: isMe ? '#dfe6e9' : '#6c5ce7' }}>{msg.username}</span>
                     
-                    {isMe && (
+                    {isMe && msg._id && (
                       <div style={{ display: 'flex', gap: '6px' }}>
                         {msg.type === 'text' && (
                           <button onClick={() => handleEdit(msg)} style={actionBtnStyle}>✏️</button>
