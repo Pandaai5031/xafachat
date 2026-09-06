@@ -5,11 +5,18 @@ const cors = require('cors');
 const mongoose = require('mongoose');
 
 const app = express();
-app.use(cors());
+
+// CORS sozlamalari
+app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '50mb' }));
 
-// MongoDB Atlas ulanishi
-const MONGO_URI = "mongodb+srv://madaliyevabror87_db_user:VhKvXdSKS3hxJsVF@cluster0.afuoudb.mongodb.net/xafaChatDB?retryWrites=true&w=majority";
+// Health-check endpoint (Render server uxlamay turishi uchun)
+app.get('/', (req, res) => {
+  res.send('XAFA Chat Backend is running live!');
+});
+
+// MongoDB Atlas ulanishi (Render Environment Variables dan oladi)
+const MONGO_URI = process.env.MONGO_URI || "mongodb+srv://madaliyevabror87_db_user:VhKvXdSKS3hxJsVF@cluster0.afuoudb.mongodb.net/xafaChatDB?retryWrites=true&w=majority";
 
 mongoose.connect(MONGO_URI)
   .then(() => console.log('MongoDB Atlas-ga muvaffaqiyatli ulandi!'))
@@ -27,12 +34,19 @@ const MessageSchema = new mongoose.Schema({
 const Message = mongoose.model('Message', MessageSchema);
 
 const server = http.createServer(app);
+
+// Socket.io sozlamalari
 const io = socketIo(server, {
-  cors: { origin: '*', methods: ['GET', 'POST'] },
-  maxHttpBufferSize: 1e8
+  cors: {
+    origin: '*',
+    methods: ['GET', 'POST']
+  },
+  maxHttpBufferSize: 1e8 // Buyuk hajmdagi fayllar (50MB+) uchun
 });
 
 io.on('connection', async (socket) => {
+  console.log('Yangi foydalanuvchi ulandi:', socket.id);
+
   // Bazadan oxirgi 100 ta xabarni olish
   try {
     const history = await Message.find().sort({ createdAt: 1 }).limit(100);
@@ -41,7 +55,7 @@ io.on('connection', async (socket) => {
     console.error('Xabarlarni yuklashda xatolik:', err);
   }
 
-  // Yangi xabar kelganda bazaga saqlash va tarqatish
+  // Yangi xabar kelganda bazaga saqlash va hammaning ekraniga tarqatish
   socket.on('sendMessage', async (data) => {
     const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     
@@ -58,6 +72,10 @@ io.on('connection', async (socket) => {
     } catch (err) {
       console.error('Xabarni saqlashda xatolik:', err);
     }
+  });
+
+  socket.on('disconnect', () => {
+    console.log('Foydalanuvchi uzildi:', socket.id);
   });
 });
 
