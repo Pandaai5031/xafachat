@@ -36,6 +36,8 @@ const io = socketIo(server, {
 });
 
 io.on('connection', async (socket) => {
+  console.log('Yangi foydalanuvchi ulandi:', socket.id);
+
   try {
     const history = await Message.find().sort({ createdAt: 1 }).limit(100);
     socket.emit('initMessages', history);
@@ -43,7 +45,7 @@ io.on('connection', async (socket) => {
     console.error('Fetch error:', err);
   }
 
-  // Yangi xabar saqlash va tarqatish
+  // Yangi xabar saqlash
   socket.on('sendMessage', async (data) => {
     const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const newMsg = new Message({
@@ -55,18 +57,22 @@ io.on('connection', async (socket) => {
 
     try {
       const savedMsg = await newMsg.save();
-      io.emit('message', savedMsg); // To'liq saqlangan obyekt yuboriladi (_id bilan)
+      io.emit('message', savedMsg);
     } catch (err) {
       console.error('Save error:', err);
     }
   });
 
   // Tahrirlash
-  socket.on('editMessage', async ({ id, newContent }) => {
+  socket.on('editMessage', async (payload) => {
+    console.log('Edit keldi:', payload);
+    const { id, newContent } = payload || {};
+    if (!id || !newContent) return;
+
     try {
       const updated = await Message.findByIdAndUpdate(id, { content: newContent }, { new: true });
       if (updated) {
-        io.emit('messageEdited', { id, newContent });
+        io.emit('messageEdited', { id: updated._id.toString(), newContent: updated.content });
       }
     } catch (err) {
       console.error('Edit error:', err);
@@ -75,9 +81,12 @@ io.on('connection', async (socket) => {
 
   // O'chirish
   socket.on('deleteMessage', async (id) => {
+    console.log('Delete keldi ID:', id);
+    if (!id) return;
+
     try {
       await Message.findByIdAndDelete(id);
-      io.emit('messageDeleted', id);
+      io.emit('messageDeleted', id.toString());
     } catch (err) {
       console.error('Delete error:', err);
     }
@@ -85,4 +94,4 @@ io.on('connection', async (socket) => {
 });
 
 const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => console.log('Server running on port ' + PORT));ss
+server.listen(PORT, () => console.log('Server running on port ' + PORT));

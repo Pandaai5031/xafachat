@@ -27,11 +27,13 @@ export default function App() {
     });
 
     socket.on('messageEdited', ({ id, newContent }) => {
-      setChat((prev) => prev.map((msg) => msg._id === id ? { ...msg, content: newContent } : msg));
+      setChat((prev) =>
+        prev.map((msg) => (String(msg._id) === String(id) ? { ...msg, content: newContent } : msg))
+      );
     });
 
     socket.on('messageDeleted', (id) => {
-      setChat((prev) => prev.filter((msg) => msg._id !== id));
+      setChat((prev) => prev.filter((msg) => String(msg._id) !== String(id)));
     });
 
     return () => {
@@ -110,21 +112,29 @@ export default function App() {
   };
 
   const handleEdit = (msg) => {
+    if (!msg._id) {
+      alert("Xabar ID-si topilmadi. Sahifani yangilab ko'ring.");
+      return;
+    }
     setEditingId(msg._id);
     setEditText(msg.content);
   };
 
   const saveEdit = (id) => {
     if (editText.trim() && id) {
-      socket.emit('editMessage', { id, newContent: editText });
+      socket.emit('editMessage', { id: String(id), newContent: editText });
       setEditingId(null);
       setEditText('');
     }
   };
 
   const handleDelete = (id) => {
-    if (id && window.confirm("Xabarni o'chirmoqchimisiz?")) {
-      socket.emit('deleteMessage', id);
+    if (!id) {
+      alert("Xabar ID-si topilmadi. Sahifani yangilab ko'ring.");
+      return;
+    }
+    if (window.confirm("Xabarni o'chirmoqchimisiz?")) {
+      socket.emit('deleteMessage', String(id));
     }
   };
 
@@ -171,16 +181,18 @@ export default function App() {
         </header>
 
         <div style={messageAreaStyle}>
-          {chat.map((msg) => {
+          {chat.map((msg, index) => {
             const isMe = msg.username === username;
+            const msgKey = msg._id || index;
+
             return (
-              <div key={msg._id} style={{ ...msgWrapperStyle, justifyContent: isMe ? 'flex-end' : 'flex-start' }}>
+              <div key={msgKey} style={{ ...msgWrapperStyle, justifyContent: isMe ? 'flex-end' : 'flex-start' }}>
                 <div style={{ ...msgBubbleStyle, background: isMe ? 'linear-gradient(135deg, #6c5ce7, #a29bfe)' : '#ffffff', color: isMe ? '#fff' : '#2d3436', borderRadius: isMe ? '18px 18px 4px 18px' : '18px 18px 18px 4px' }}>
                   
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', marginBottom: '4px' }}>
                     <span style={{ fontSize: '11px', fontWeight: '700', color: isMe ? '#dfe6e9' : '#6c5ce7' }}>{msg.username}</span>
                     
-                    {isMe && msg._id && (
+                    {isMe && (
                       <div style={{ display: 'flex', gap: '6px' }}>
                         {msg.type === 'text' && (
                           <button onClick={() => handleEdit(msg)} style={actionBtnStyle}>✏️</button>
