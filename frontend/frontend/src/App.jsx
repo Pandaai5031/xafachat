@@ -2,10 +2,12 @@ import React, { useState, useEffect, useRef } from 'react';
 import io from 'socket.io-client';
 
 const BACKEND_URL = 'https://xafachat.onrender.com';
+
 const socket = io(BACKEND_URL, { 
-  transports: ['websocket', 'polling'],
+  transports: ['polling', 'websocket'],
   reconnection: true,
-  reconnectionAttempts: 5
+  reconnectionAttempts: 20,
+  reconnectionDelay: 2000
 });
 
 export default function App() {
@@ -28,7 +30,7 @@ export default function App() {
   const [audioRecording, setAudioRecording] = useState(false);
   const [circleVideoRecording, setCircleVideoRecording] = useState(false);
 
-  // Design Theme Customization
+  // Design Theme
   const [theme, setTheme] = useState(() => localStorage.getItem('xafa_theme') || 'purple');
 
   // Refs
@@ -38,6 +40,20 @@ export default function App() {
   const videoChunksRef = useRef([]);
   const videoPreviewRef = useRef(null);
   const chatEndRef = useRef(null);
+
+  // Render serverini har 45 soniyada uyg'otib turish (Ping)
+  useEffect(() => {
+    const pingServer = async () => {
+      try {
+        await fetch(BACKEND_URL);
+      } catch (e) {
+        console.log("Ping error:", e);
+      }
+    };
+    pingServer();
+    const interval = setInterval(pingServer, 45000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     if (currentUser) {
@@ -77,7 +93,23 @@ export default function App() {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chat]);
 
-  // Auth funksiyalari
+  // Avtomatik qayta urinuvchi so'rov yuborish
+  const fetchWithRetry = async (url, options, retries = 3, delay = 3000) => {
+    for (let i = 0; i < retries; i++) {
+      try {
+        const response = await fetch(url, options);
+        if (response.ok || response.status === 400) {
+          return response;
+        }
+      } catch (err) {
+        if (i === retries - 1) throw err;
+        setAuthError(`Server uyg'onmoqda, qayta ulanilmoqda... (${i + 1}/${retries})`);
+        await new Promise((res) => setTimeout(res, delay));
+      }
+    }
+  };
+
+  // Auth funksiyasi
   const handleAuth = async (e) => {
     e.preventDefault();
     if (!usernameInput.trim() || !passwordInput) {
@@ -85,17 +117,16 @@ export default function App() {
       return;
     }
 
-    setAuthError('');
+    setAuthError('Server ulanmoqda, iltimos kuting...');
     setLoading(true);
 
     const endpoint = isLoginMode ? '/api/auth/login' : '/api/auth/register';
 
     try {
-      const res = await fetch(`${BACKEND_URL}${endpoint}`, {
+      const res = await fetchWithRetry(`${BACKEND_URL}${endpoint}`, {
         method: 'POST',
         headers: { 
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({ username: usernameInput.trim(), password: passwordInput })
       });
@@ -108,12 +139,13 @@ export default function App() {
         return;
       }
 
+      setAuthError('');
       localStorage.setItem('xafa_user', data.username);
       setCurrentUser(data.username);
       socket.emit('userConnected', data.username);
     } catch (err) {
       console.error("Auth Request Error:", err);
-      setAuthError("Server bilan ulanishda xatolik! Render serveri uyqudan uyg'onayotgan bo'lishi mumkin (30 soniya kuting).");
+      setAuthError("Server bilan ulanishda xatolik! Brauzerda https://xafachat.onrender.com manzilini 1 marta ochib ko'ring.");
     } finally {
       setLoading(false);
     }
@@ -133,7 +165,7 @@ export default function App() {
     }
   };
 
-  // Fayl (Rasm / Video) yuborish
+  // Fayl yuborish
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -152,7 +184,7 @@ export default function App() {
     reader.readAsDataURL(file);
   };
 
-  // Audio yozib olish (Ovozli xabar)
+  // Audio yozib olish
   const startAudioRecord = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -377,7 +409,7 @@ export default function App() {
                       {msg.username} <span style={{ fontSize: '9px', color: isUserOnline ? '#00b894' : '#b2bec3' }}>({isUserOnline ? 'online' : 'offline'})</span>
                     </span>
 
-                    {/* Edit / Delete Buttons (Faqat o'zining xabarida) */}
+                    {/* Edit / Delete Buttons */}
                     {isMe && (
                       <div style={{ display: 'flex', gap: '4px' }}>
                         {msg.type === 'text' && (
@@ -422,13 +454,11 @@ export default function App() {
         {/* Input Bar */}
         <form onSubmit={sendTextMessage} style={{ ...inputBarStyle, background: theme === 'dark' ? '#1e272e' : '#ffffff' }}>
           
-          {/* File Button */}
           <label style={iconBtnStyle} title="Rasm/Video biriktirish">
             📁
             <input type="file" accept="image/*,video/*" onChange={handleFileUpload} style={{ display: 'none' }} />
           </label>
 
-          {/* Krujok Button */}
           <button
             type="button"
             onClick={circleVideoRecording ? stopCircleVideoRecord : startCircleVideoRecord}
@@ -438,7 +468,6 @@ export default function App() {
             {circleVideoRecording ? '⏹️' : '📹'}
           </button>
 
-          {/* Ovozli Xabar Button */}
           <button
             type="button"
             onClick={audioRecording ? stopAudioRecord : startAudioRecord}
@@ -448,7 +477,6 @@ export default function App() {
             {audioRecording ? '⏹️' : '🎙️'}
           </button>
 
-          {/* Text Input */}
           <input
             type="text"
             placeholder="Xabar yozing..."
@@ -457,7 +485,6 @@ export default function App() {
             style={{ ...inputStyle, flex: 1, margin: 0 }}
           />
 
-          {/* Send Button */}
           <button type="submit" style={sendBtnStyle}>🚀</button>
         </form>
 

@@ -6,30 +6,30 @@ const mongoose = require('mongoose');
 
 const app = express();
 
-// CORS sozlamalari (Barcha domenlardan keluvchi so'rovlarga ruxsat beradi)
+// CORS har qanday so'rov va domen uchun to'liq ochiq
 app.use(cors({
   origin: '*',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
 }));
 
-// Base64 rasm va videolarni qabul qilish uchun hajmni oshiramiz (100MB)
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
 
-// Server holatini tekshirish uchun Asosiy Marshrut
+// Ping/Health Check endpoint (Render uyg'otish uchun)
 app.get('/', (req, res) => {
-  res.send({ status: 'ok', message: 'XAFA Chat Pro Backend Live!' });
+  res.status(200).json({ status: 'ok', message: 'XAFA Chat Pro Backend Live!' });
 });
 
-// MongoDB Atlas Ulanish URLi
+// MongoDB Atlas URI
 const MONGO_URI = process.env.MONGO_URI || "mongodb+srv://madaliyevabror87_db_user:VhKvXdSKS3hxJsVF@cluster0.afuoudb.mongodb.net/xafaChatDB?retryWrites=true&w=majority";
 
 mongoose.connect(MONGO_URI)
   .then(() => console.log('✅ MongoDB Atlas-ga muvaffaqiyatli ulandi!'))
   .catch((err) => console.error('❌ MongoDB xatosi:', err));
 
-// Database Schemalari
+// Schemas
 const UserSchema = new mongoose.Schema({
   username: { type: String, unique: true, required: true },
   password: { type: String, required: true },
@@ -39,7 +39,7 @@ const UserSchema = new mongoose.Schema({
 
 const MessageSchema = new mongoose.Schema({
   username: String,
-  type: String, // 'text', 'image', 'video', 'audio', 'circleVideo'
+  type: String,
   content: String,
   time: String,
   createdAt: { type: Date, default: Date.now }
@@ -48,7 +48,7 @@ const MessageSchema = new mongoose.Schema({
 const User = mongoose.model('User', UserSchema);
 const Message = mongoose.model('Message', MessageSchema);
 
-// Auth REST API-lar
+// Auth REST API
 app.post('/api/auth/register', async (req, res) => {
   try {
     const { username, password } = req.body;
@@ -69,7 +69,7 @@ app.post('/api/auth/register', async (req, res) => {
     const user = new User({ username: cleanUsername, password, avatarBg: randomColor });
     await user.save();
 
-    return res.json({ success: true, username: user.username, avatarBg: user.avatarBg });
+    return res.status(200).json({ success: true, username: user.username, avatarBg: user.avatarBg });
   } catch (err) {
     console.error('Register Xatosi:', err);
     return res.status(500).json({ error: "Serverda saqlashda xatolik yuz berdi" });
@@ -90,29 +90,23 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(400).json({ error: "Nik yoki parol noto'g'ri!" });
     }
 
-    return res.json({ success: true, username: user.username, avatarBg: user.avatarBg });
+    return res.status(200).json({ success: true, username: user.username, avatarBg: user.avatarBg });
   } catch (err) {
     console.error('Login Xatosi:', err);
     return res.status(500).json({ error: "Server ichki xatosi" });
   }
 });
 
-// Socket.io Sozlamalari
+// Socket.io
 const server = http.createServer(app);
 const io = socketIo(server, {
-  cors: { 
-    origin: '*', 
-    methods: ['GET', 'POST'] 
-  },
-  maxHttpBufferSize: 1e8 // Large file upload (100MB)
+  cors: { origin: '*', methods: ['GET', 'POST'] },
+  maxHttpBufferSize: 1e8
 });
 
 const onlineUsers = new Map();
 
 io.on('connection', async (socket) => {
-  console.log('⚡ Socket ulandi:', socket.id);
-
-  // Oxirgi 100 ta xabarni yuklash
   try {
     const history = await Message.find().sort({ createdAt: 1 }).limit(100);
     socket.emit('initMessages', history);
@@ -120,16 +114,13 @@ io.on('connection', async (socket) => {
     console.error('Tarix yuklashda xato:', err);
   }
 
-  // Foydalanuvchi online bo'lganda
   socket.on('userConnected', (username) => {
     if (username) {
       onlineUsers.set(socket.id, username.toLowerCase());
-      const activeList = Array.from(new Set(onlineUsers.values()));
-      io.emit('onlineList', activeList);
+      io.emit('onlineList', Array.from(new Set(onlineUsers.values())));
     }
   });
 
-  // Yangi xabar yuborish
   socket.on('sendMessage', async (data) => {
     try {
       const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -139,7 +130,6 @@ io.on('connection', async (socket) => {
         content: data.content,
         time: timeStr
       });
-
       const savedMsg = await newMsg.save();
       io.emit('message', savedMsg);
     } catch (err) {
@@ -147,7 +137,6 @@ io.on('connection', async (socket) => {
     }
   });
 
-  // Xabarni tahrirlash (Edit)
   socket.on('editMessage', async ({ id, username, newContent }) => {
     try {
       const msg = await Message.findById(id);
@@ -161,7 +150,6 @@ io.on('connection', async (socket) => {
     }
   });
 
-  // Xabarni o'chirish (Delete)
   socket.on('deleteMessage', async ({ id, username }) => {
     try {
       const msg = await Message.findById(id);
@@ -174,16 +162,12 @@ io.on('connection', async (socket) => {
     }
   });
 
-  // Foydalanuvchi uzilganda (Disconnect)
   socket.on('disconnect', () => {
     onlineUsers.delete(socket.id);
-    const activeList = Array.from(new Set(onlineUsers.values()));
-    io.emit('onlineList', activeList);
-    console.log('🔌 Socket uzildi:', socket.id);
+    io.emit('onlineList', Array.from(new Set(onlineUsers.values())));
   });
 });
 
-// Portni sozlash
 const PORT = process.env.PORT || 10000;
 server.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
