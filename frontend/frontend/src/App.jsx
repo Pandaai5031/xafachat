@@ -11,14 +11,10 @@ const socket = io(BACKEND_URL, {
 });
 
 export default function App() {
-  // Auth state
-  const [currentUser, setCurrentUser] = useState(() => localStorage.getItem('xafa_user') || null);
-  const [isLoginMode, setIsLoginMode] = useState(true);
+  // Foydalanuvchi va kirish holati (Ro'yxatdan o'tishsiz, faqat nik bilan)
+  const [currentUser, setCurrentUser] = useState(() => localStorage.getItem('xafa_user') || '');
   const [usernameInput, setUsernameInput] = useState('');
-  const [passwordInput, setPasswordInput] = useState('');
-  const [authError, setAuthError] = useState('');
-  const [loading, setLoading] = useState(false);
-
+  
   // Chat state
   const [chat, setChat] = useState([]);
   const [message, setMessage] = useState('');
@@ -26,11 +22,11 @@ export default function App() {
   const [editingId, setEditingId] = useState(null);
   const [editText, setEditText] = useState('');
 
-  // Recording state
+  // Yozib olish holatlari
   const [audioRecording, setAudioRecording] = useState(false);
   const [circleVideoRecording, setCircleVideoRecording] = useState(false);
 
-  // Design Theme
+  // Dizayn mavzusi
   const [theme, setTheme] = useState(() => localStorage.getItem('xafa_theme') || 'purple');
 
   // Refs
@@ -41,7 +37,18 @@ export default function App() {
   const videoPreviewRef = useRef(null);
   const chatEndRef = useRef(null);
 
-  // Render serverini har 45 soniyada uyg'otib turish (Ping)
+  // Mobil qurilmalarda keyboard ochilganda ekran kattalashib ketishini (Zoom) oldini olish
+  useEffect(() => {
+    let meta = document.querySelector('meta[name="viewport"]');
+    if (!meta) {
+      meta = document.createElement('meta');
+      meta.name = 'viewport';
+      document.getElementsByTagName('head')[0].appendChild(meta);
+    }
+    meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
+  }, []);
+
+  // Serverni uyg'otib turish
   useEffect(() => {
     const pingServer = async () => {
       try {
@@ -51,10 +58,11 @@ export default function App() {
       }
     };
     pingServer();
-    const interval = setInterval(pingServer, 45000);
+    const interval = setInterval(pingServer, 40000);
     return () => clearInterval(interval);
   }, []);
 
+  // Socket hodisalari
   useEffect(() => {
     if (currentUser) {
       socket.emit('userConnected', currentUser);
@@ -93,79 +101,32 @@ export default function App() {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chat]);
 
-  // Avtomatik qayta urinuvchi so'rov yuborish
-  const fetchWithRetry = async (url, options, retries = 3, delay = 3000) => {
-    for (let i = 0; i < retries; i++) {
-      try {
-        const response = await fetch(url, options);
-        if (response.ok || response.status === 400) {
-          return response;
-        }
-      } catch (err) {
-        if (i === retries - 1) throw err;
-        setAuthError(`Server uyg'onmoqda, qayta ulanilmoqda... (${i + 1}/${retries})`);
-        await new Promise((res) => setTimeout(res, delay));
-      }
-    }
-  };
-
-  // Auth funksiyasi
-  const handleAuth = async (e) => {
+  // Faqat Nik bilan kirish
+  const handleSimpleLogin = (e) => {
     e.preventDefault();
-    if (!usernameInput.trim() || !passwordInput) {
-      setAuthError("Nik va parolni kiriting!");
-      return;
-    }
+    const name = usernameInput.trim();
+    if (!name) return;
 
-    setAuthError('Server ulanmoqda, iltimos kuting...');
-    setLoading(true);
-
-    const endpoint = isLoginMode ? '/api/auth/login' : '/api/auth/register';
-
-    try {
-      const res = await fetchWithRetry(`${BACKEND_URL}${endpoint}`, {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ username: usernameInput.trim(), password: passwordInput })
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        setAuthError(data.error || 'Xatolik yuz berdi');
-        setLoading(false);
-        return;
-      }
-
-      setAuthError('');
-      localStorage.setItem('xafa_user', data.username);
-      setCurrentUser(data.username);
-      socket.emit('userConnected', data.username);
-    } catch (err) {
-      console.error("Auth Request Error:", err);
-      setAuthError("Server bilan ulanishda xatolik! Brauzerda https://xafachat.onrender.com manzilini 1 marta ochib ko'ring.");
-    } finally {
-      setLoading(false);
-    }
+    localStorage.setItem('xafa_user', name);
+    setCurrentUser(name);
+    socket.emit('userConnected', name);
   };
 
   const handleLogout = () => {
     localStorage.removeItem('xafa_user');
-    setCurrentUser(null);
+    setCurrentUser('');
   };
 
-  // Xabar yuborish
+  // Matnli xabar yuborish
   const sendTextMessage = (e) => {
     e.preventDefault();
     if (message.trim()) {
-      socket.emit('sendMessage', { username: currentUser, type: 'text', content: message });
+      socket.emit('sendMessage', { username: currentUser, type: 'text', content: message.trim() });
       setMessage('');
     }
   };
 
-  // Fayl yuborish
+  // Rasm yoki Video yuborish
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -174,7 +135,7 @@ export default function App() {
     const fileType = file.type.startsWith('image/') ? 'image' : file.type.startsWith('video/') ? 'video' : null;
 
     if (!fileType) {
-      alert('Faqat rasm yoki video biriktirishingiz mumkin!');
+      alert('Faqat rasm yoki video tanlang!');
       return;
     }
 
@@ -184,7 +145,7 @@ export default function App() {
     reader.readAsDataURL(file);
   };
 
-  // Audio yozib olish
+  // Ovozli xabar yozish (Audio Note)
   const startAudioRecord = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -224,9 +185,13 @@ export default function App() {
         audio: true 
       });
       
-      if (videoPreviewRef.current) {
-        videoPreviewRef.current.srcObject = stream;
-      }
+      setCircleVideoRecording(true);
+
+      setTimeout(() => {
+        if (videoPreviewRef.current) {
+          videoPreviewRef.current.srcObject = stream;
+        }
+      }, 100);
 
       videoRecorderRef.current = new MediaRecorder(stream);
       videoChunksRef.current = [];
@@ -243,9 +208,9 @@ export default function App() {
       };
 
       videoRecorderRef.current.start();
-      setCircleVideoRecording(true);
     } catch (err) {
-      alert('Kameraga ruxsat berilmadi!');
+      alert('Kameraga va mikrofonga ruxsat berilmadi!');
+      setCircleVideoRecording(false);
     }
   };
 
@@ -256,7 +221,7 @@ export default function App() {
     }
   };
 
-  // Tahrirlash (Edit)
+  // Tahrirlash
   const handleEdit = (msg) => {
     setEditingId(msg._id);
     setEditText(msg.content);
@@ -270,9 +235,10 @@ export default function App() {
     }
   };
 
-  // O'chirish (Delete)
+  // Aniq Ishlaydigan O'chirish (Delete)
   const handleDelete = (id) => {
-    if (id && window.confirm("Haqiqatan ham ushbu xabarni o'chirib tashlamoqchimisiz?")) {
+    if (!id) return;
+    if (window.confirm("Rostdan ham ushbu xabarni o'chirmoqchimisiz?")) {
       socket.emit('deleteMessage', { id, username: currentUser });
     }
   };
@@ -282,7 +248,6 @@ export default function App() {
     localStorage.setItem('xafa_theme', newTheme);
   };
 
-  // Theme Styllari
   const themeStyles = {
     purple: { bg: 'linear-gradient(135deg, #6c5ce7 0%, #a29bfe 100%)', headerBg: '#ffffff', bubbleMe: 'linear-gradient(135deg, #6c5ce7, #8c7ae6)' },
     dark: { bg: 'linear-gradient(135deg, #0f2027, #203a43, #2c5364)', headerBg: '#1e272e', bubbleMe: 'linear-gradient(135deg, #00b894, #00cec9)' },
@@ -292,54 +257,36 @@ export default function App() {
 
   const currentStyle = themeStyles[theme] || themeStyles.purple;
 
-  // Login / Register oyna (Kirmagan bo'lsa)
+  // 1. Kirmagan bo'lsa - Shunchaki Nik bilan kirish oynasi
   if (!currentUser) {
     return (
-      <div style={{ display: 'flex', height: '100vh', justifyContent: 'center', alignItems: 'center', background: currentStyle.bg, fontFamily: 'Segoe UI, sans-serif' }}>
-        <div style={authCardStyle}>
-          <div style={{ fontSize: '48px', marginBottom: '8px' }}>💬</div>
-          <h2 style={{ margin: '0 0 6px 0', fontSize: '26px', fontWeight: '800', color: '#2d3436' }}>XAFA Chat</h2>
-          <p style={{ margin: '0 0 20px 0', fontSize: '13px', color: '#636e72' }}>
-            {isLoginMode ? 'Oʻz profilingizga kiring' : 'Yangi profil roʻyxatdan oʻtkazing'}
-          </p>
+      <div style={{ display: 'flex', height: '100vh', justifyContent: 'center', alignItems: 'center', background: currentStyle.bg, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
+        <div style={loginCardStyle}>
+          <div style={{ fontSize: '54px', marginBottom: '10px' }}>💬</div>
+          <h2 style={{ margin: '0 0 8px 0', fontSize: '26px', fontWeight: '800', color: '#2d3436' }}>XAFA Chat</h2>
+          <p style={{ margin: '0 0 24px 0', fontSize: '14px', color: '#636e72' }}>Chatga kirish uchun ismingizni kiriting:</p>
 
-          {authError && <div style={errorStyle}>{authError}</div>}
-
-          <form onSubmit={handleAuth} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          <form onSubmit={handleSimpleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
             <input
               type="text"
-              placeholder="Nik (Username)"
+              placeholder="Ismingiz (masalan: Ali)"
               value={usernameInput}
               onChange={(e) => setUsernameInput(e.target.value)}
-              style={inputStyle}
+              style={textInputStyle}
               required
             />
-            <input
-              type="password"
-              placeholder="Parol"
-              value={passwordInput}
-              onChange={(e) => setPasswordInput(e.target.value)}
-              style={inputStyle}
-              required
-            />
-            <button type="submit" disabled={loading} style={{ ...btnPrimaryStyle, opacity: loading ? 0.7 : 1 }}>
-              {loading ? 'Kutib turing...' : (isLoginMode ? 'Kirish' : 'Roʻyxatdan oʻtish')}
+            <button type="submit" style={btnPrimaryStyle}>
+              Chatga kirish 🚀
             </button>
           </form>
-
-          <button
-            onClick={() => { setIsLoginMode(!isLoginMode); setAuthError(''); }}
-            style={{ background: 'none', border: 'none', color: '#6c5ce7', marginTop: '18px', cursor: 'pointer', fontSize: '13px', fontWeight: '600' }}
-          >
-            {isLoginMode ? "Akkauntingiz yo'qmi? Ro'yxatdan o'ting" : "Akkauntingiz bormi? Kirish"}
-          </button>
         </div>
       </div>
     );
   }
 
+  // 2. Chat Asosiy oynasi
   return (
-    <div style={{ display: 'flex', height: '100vh', justifyContent: 'center', alignItems: 'center', background: currentStyle.bg, fontFamily: 'Segoe UI, sans-serif' }}>
+    <div style={{ display: 'flex', height: '100vh', justifyContent: 'center', alignItems: 'center', background: currentStyle.bg, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
       <div style={chatContainerStyle}>
         
         {/* Top Header */}
@@ -351,7 +298,7 @@ export default function App() {
                 {currentUser}
               </div>
               <div style={{ fontSize: '11px', color: '#00b894', fontWeight: '600' }}>
-                ● Online ({onlineList.length} faol)
+                ● Online ({onlineList.length} kishi)
               </div>
             </div>
           </div>
@@ -364,7 +311,7 @@ export default function App() {
             >
               <option value="purple">💜 Binafsha</option>
               <option value="dark">🌙 Qorong'i</option>
-              <option value="sunset">🌅 Qosh qorayishi</option>
+              <option value="sunset">🌅 Quyosh</option>
               <option value="emerald">🟢 Zumrad</option>
             </select>
             <button onClick={handleLogout} style={logoutBtnStyle} title="Chiqish">🚪</button>
@@ -373,7 +320,7 @@ export default function App() {
 
         {/* Online Status Bar */}
         <div style={onlineStripStyle}>
-          <span style={{ fontSize: '11px', color: '#636e72', marginRight: '6px' }}>Faol foydalanuvchilar:</span>
+          <span style={{ fontSize: '11px', color: '#636e72', marginRight: '6px' }}>Onlayn:</span>
           {onlineList.map((u) => (
             <span key={u} style={onlineBadgeStyle}>
               <span style={{ color: '#00b894', marginRight: '4px' }}>●</span>{u}
@@ -383,8 +330,9 @@ export default function App() {
 
         {/* Krujok Yozish Preview Modal */}
         {circleVideoRecording && (
-          <div style={{ position: 'absolute', top: '100px', left: '50%', transform: 'translateX(-50%)', zIndex: 10, background: 'rgba(0,0,0,0.85)', padding: '12px', borderRadius: '50%', boxShadow: '0 10px 25px rgba(0,0,0,0.5)' }}>
-            <video ref={videoPreviewRef} autoPlay muted style={{ width: '150px', height: '150px', borderRadius: '50%', objectFit: 'cover' }} />
+          <div style={{ position: 'absolute', top: '90px', left: '50%', transform: 'translateX(-50%)', zIndex: 100, background: 'rgba(0,0,0,0.85)', padding: '12px', borderRadius: '50%', boxShadow: '0 10px 30px rgba(0,0,0,0.5)', textAlign: 'center' }}>
+            <video ref={videoPreviewRef} autoPlay muted style={{ width: '160px', height: '160px', borderRadius: '50%', objectFit: 'cover' }} />
+            <div style={{ color: '#fff', fontSize: '11px', marginTop: '6px', fontWeight: 'bold' }}>🔴 Yozilmoqda...</div>
           </div>
         )}
 
@@ -411,7 +359,7 @@ export default function App() {
 
                     {/* Edit / Delete Buttons */}
                     {isMe && (
-                      <div style={{ display: 'flex', gap: '4px' }}>
+                      <div style={{ display: 'flex', gap: '6px' }}>
                         {msg.type === 'text' && (
                           <button onClick={() => handleEdit(msg)} style={actionBtnStyle} title="Tahrirlash">✏️</button>
                         )}
@@ -427,23 +375,25 @@ export default function App() {
                         type="text"
                         value={editText}
                         onChange={(e) => setEditText(e.target.value)}
-                        style={{ ...inputStyle, padding: '4px 8px', fontSize: '13px', margin: 0, flex: 1 }}
+                        style={{ ...textInputStyle, padding: '6px 10px', fontSize: '14px', margin: 0, flex: 1 }}
                       />
-                      <button onClick={() => saveEdit(msg._id)} style={{ ...btnPrimaryStyle, padding: '4px 10px', fontSize: '12px' }}>✓</button>
+                      <button onClick={() => saveEdit(msg._id)} style={{ ...btnPrimaryStyle, padding: '6px 12px', fontSize: '12px' }}>✓</button>
                     </div>
                   ) : (
                     <>
-                      {msg.type === 'text' && <div style={{ wordBreak: 'break-word', fontSize: '14px', lineHeight: '1.4' }}>{msg.content}</div>}
+                      {msg.type === 'text' && <div style={{ wordBreak: 'break-word', fontSize: '15px', lineHeight: '1.4' }}>{msg.content}</div>}
                       {msg.type === 'image' && <img src={msg.content} alt="Rasm" style={mediaStyle} />}
                       {msg.type === 'video' && <video src={msg.content} controls style={mediaStyle} />}
                       {msg.type === 'audio' && <audio src={msg.content} controls style={{ maxWidth: '100%', height: '36px', marginTop: '4px' }} />}
                       {msg.type === 'circleVideo' && (
-                        <video src={msg.content} controls autoPlay loop muted style={circleVideoStyle} />
+                        <div style={{ textAlign: 'center', padding: '4px 0' }}>
+                          <video src={msg.content} controls autoPlay loop muted style={circleVideoStyle} />
+                        </div>
                       )}
                     </>
                   )}
 
-                  <div style={{ fontSize: '9px', opacity: 0.7, textAlign: 'right', marginTop: '4px' }}>{msg.time}</div>
+                  <div style={{ fontSize: '9px', opacity: 0.75, textAlign: 'right', marginTop: '4px' }}>{msg.time}</div>
                 </div>
               </div>
             );
@@ -451,10 +401,10 @@ export default function App() {
           <div ref={chatEndRef} />
         </div>
 
-        {/* Input Bar */}
+        {/* Input Bar - Zoom xatosini yo'qotuvchi maxsus shrift o'lchami bilan */}
         <form onSubmit={sendTextMessage} style={{ ...inputBarStyle, background: theme === 'dark' ? '#1e272e' : '#ffffff' }}>
           
-          <label style={iconBtnStyle} title="Rasm/Video biriktirish">
+          <label style={iconBtnStyle} title="Rasm/Video">
             📁
             <input type="file" accept="image/*,video/*" onChange={handleFileUpload} style={{ display: 'none' }} />
           </label>
@@ -462,7 +412,7 @@ export default function App() {
           <button
             type="button"
             onClick={circleVideoRecording ? stopCircleVideoRecord : startCircleVideoRecord}
-            style={{ ...iconBtnStyle, background: circleVideoRecording ? '#ff7675' : '#f1f2f6' }}
+            style={{ ...iconBtnStyle, background: circleVideoRecording ? '#ff7675' : '#f1f2f6', color: circleVideoRecording ? '#fff' : '#2d3436' }}
             title={circleVideoRecording ? "Yumaloq videoni yuborish" : "Yumaloq video (Кружок)"}
           >
             {circleVideoRecording ? '⏹️' : '📹'}
@@ -471,7 +421,7 @@ export default function App() {
           <button
             type="button"
             onClick={audioRecording ? stopAudioRecord : startAudioRecord}
-            style={{ ...iconBtnStyle, background: audioRecording ? '#ff7675' : '#f1f2f6' }}
+            style={{ ...iconBtnStyle, background: audioRecording ? '#ff7675' : '#f1f2f6', color: audioRecording ? '#fff' : '#2d3436' }}
             title={audioRecording ? "Ovozni yuborish" : "Ovozli xabar"}
           >
             {audioRecording ? '⏹️' : '🎙️'}
@@ -482,7 +432,7 @@ export default function App() {
             placeholder="Xabar yozing..."
             value={message}
             onChange={(e) => setMessage(e.target.value)}
-            style={{ ...inputStyle, flex: 1, margin: 0 }}
+            style={chatInputStyle}
           />
 
           <button type="submit" style={sendBtnStyle}>🚀</button>
@@ -493,22 +443,25 @@ export default function App() {
   );
 }
 
-// Styling Object-lar
-const authCardStyle = { background: '#ffffff', padding: '36px 28px', borderRadius: '24px', width: '90%', maxWidth: '360px', boxShadow: '0 20px 40px rgba(0,0,0,0.2)', textAlign: 'center' };
-const chatContainerStyle = { display: 'flex', flexDirection: 'column', width: '100%', maxWidth: '480px', height: '100vh', background: '#ffffff', boxShadow: '0 0 30px rgba(0,0,0,0.2)', position: 'relative' };
+// Styllar (Mobil va Desktop uchun moslashtirilgan)
+const loginCardStyle = { background: '#ffffff', padding: '36px 28px', borderRadius: '24px', width: '90%', maxWidth: '360px', boxShadow: '0 20px 40px rgba(0,0,0,0.15)', textAlign: 'center' };
+const chatContainerStyle = { display: 'flex', flexDirection: 'column', width: '100%', maxWidth: '480px', height: '100vh', background: '#ffffff', boxShadow: '0 0 30px rgba(0,0,0,0.15)', position: 'relative' };
 const headerStyle = { padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #f1f2f6' };
-const avatarStyle = { width: '38px', height: '38px', borderRadius: '50%', background: 'linear-gradient(45deg, #6c5ce7, #a29bfe)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' };
+const avatarStyle = { width: '40px', height: '40px', borderRadius: '50%', background: 'linear-gradient(45deg, #6c5ce7, #a29bfe)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '18px' };
 const onlineStripStyle = { padding: '6px 16px', background: '#f8f9fa', borderBottom: '1px solid #eee', display: 'flex', alignItems: 'center', overflowX: 'auto', gap: '6px', whiteSpace: 'nowrap' };
-const onlineBadgeStyle = { background: '#eef2f5', padding: '2px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: '600', color: '#2d3436' };
-const messageAreaStyle = { flex: 1, padding: '14px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px' };
-const msgBubbleStyle = { padding: '10px 14px', maxWidth: '80%', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' };
-const mediaStyle = { maxWidth: '100%', borderRadius: '10px', marginTop: '6px', display: 'block' };
-const circleVideoStyle = { width: '160px', height: '160px', borderRadius: '50%', objectFit: 'cover', marginTop: '6px', border: '3px solid #ffffff' };
+const onlineBadgeStyle = { background: '#eef2f5', padding: '3px 10px', borderRadius: '12px', fontSize: '11px', fontWeight: '600', color: '#2d3436' };
+const messageAreaStyle = { flex: 1, padding: '14px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '12px' };
+const msgBubbleStyle = { padding: '10px 14px', maxWidth: '82%', boxShadow: '0 2px 8px rgba(0,0,0,0.05)' };
+const mediaStyle = { maxWidth: '100%', borderRadius: '12px', marginTop: '6px', display: 'block' };
+const circleVideoStyle = { width: '170px', height: '170px', borderRadius: '50%', objectFit: 'cover', marginTop: '4px', border: '3px solid #ffffff', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' };
 const inputBarStyle = { padding: '10px 12px', display: 'flex', gap: '8px', alignItems: 'center', borderTop: '1px solid #eee' };
-const inputStyle = { padding: '10px 14px', borderRadius: '20px', border: '1px solid #dfe6e9', background: '#f1f2f6', outline: 'none', fontSize: '14px' };
-const btnPrimaryStyle = { padding: '12px', borderRadius: '20px', border: 'none', background: 'linear-gradient(45deg, #6c5ce7, #a29bfe)', color: '#fff', fontWeight: '700', cursor: 'pointer' };
-const iconBtnStyle = { padding: '8px', borderRadius: '50%', border: 'none', background: '#f1f2f6', cursor: 'pointer', fontSize: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '38px', height: '38px' };
-const sendBtnStyle = { padding: '8px 14px', borderRadius: '20px', border: 'none', background: 'linear-gradient(45deg, #6c5ce7, #a29bfe)', color: '#fff', cursor: 'pointer', fontSize: '16px' };
-const actionBtnStyle = { background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '12px', opacity: 0.8, padding: '2px' };
-const logoutBtnStyle = { background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '18px' };
-const errorStyle = { background: '#ffeaa7', color: '#d63031', padding: '10px', borderRadius: '12px', fontSize: '12px', marginBottom: '12px', lineHeight: '1.4' };
+
+// Mobil Zoom yo'qotish kaliti: font-size: 16px qilib belgilandi
+const chatInputStyle = { flex: 1, padding: '12px 16px', borderRadius: '24px', border: '1px solid #dfe6e9', background: '#f1f2f6', outline: 'none', fontSize: '16px', margin: 0 };
+const textInputStyle = { padding: '12px 16px', borderRadius: '16px', border: '1px solid #dfe6e9', background: '#f1f2f6', outline: 'none', fontSize: '16px' };
+
+const btnPrimaryStyle = { padding: '14px', borderRadius: '16px', border: 'none', background: 'linear-gradient(45deg, #6c5ce7, #a29bfe)', color: '#fff', fontWeight: '700', fontSize: '16px', cursor: 'pointer' };
+const iconBtnStyle = { padding: '0', borderRadius: '50%', border: 'none', background: '#f1f2f6', cursor: 'pointer', fontSize: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '40px', height: '40px', flexShrink: 0 };
+const sendBtnStyle = { padding: '0 16px', height: '40px', borderRadius: '20px', border: 'none', background: 'linear-gradient(45deg, #6c5ce7, #a29bfe)', color: '#fff', cursor: 'pointer', fontSize: '18px', flexShrink: 0 };
+const actionBtnStyle = { background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '13px', padding: '2px' };
+const logoutBtnStyle = { background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '20px' };
