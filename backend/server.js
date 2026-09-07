@@ -6,18 +6,25 @@ const mongoose = require('mongoose');
 
 const app = express();
 
-app.use(cors({ origin: '*' }));
+// CORS ni to'liq ochiq qilish
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
 app.use(express.json({ limit: '100mb' }));
 
 app.get('/', (req, res) => {
-  res.send('XAFA Chat Pro Backend Live!');
+  res.send({ status: 'ok', message: 'XAFA Chat Pro Backend Live!' });
 });
 
+// MongoDB Atlas URI
 const MONGO_URI = process.env.MONGO_URI || "mongodb+srv://madaliyevabror87_db_user:VhKvXdSKS3hxJsVF@cluster0.afuoudb.mongodb.net/xafaChatDB?retryWrites=true&w=majority";
 
 mongoose.connect(MONGO_URI)
-  .then(() => console.log('MongoDB Atlas-ga ulandi!'))
-  .catch((err) => console.error('MongoDB xatosi:', err));
+  .then(() => console.log('✅ MongoDB Atlas-ga muvaffaqiyatli ulandi!'))
+  .catch((err) => console.error('❌ MongoDB xatosi:', err));
 
 // Schema-lar
 const UserSchema = new mongoose.Schema({
@@ -38,36 +45,52 @@ const MessageSchema = new mongoose.Schema({
 const User = mongoose.model('User', UserSchema);
 const Message = mongoose.model('Message', MessageSchema);
 
-// Auth Marshrutlari
+// API Marshrutlari
 app.post('/api/auth/register', async (req, res) => {
   try {
     const { username, password } = req.body;
-    if (!username || !password) return res.status(400).json({ error: "Nik va parol kiritilishi shart!" });
+    if (!username || !password) {
+      return res.status(400).json({ error: "Nik va parol kiritilishi shart!" });
+    }
 
-    const existing = await User.findOne({ username });
-    if (existing) return res.status(400).json({ error: "Bu nik band, boshqa nik tanlang yoki kiring!" });
+    const cleanUsername = username.trim().toLowerCase();
+    const existing = await User.findOne({ username: cleanUsername });
+
+    if (existing) {
+      return res.status(400).json({ error: "Bu nik band, boshqa nik tanlang yoki kiring!" });
+    }
 
     const colors = ['#6c5ce7', '#e84393', '#00b894', '#00cec9', '#fdcb6e', '#e17055'];
     const randomColor = colors[Math.floor(Math.random() * colors.length)];
 
-    const user = new User({ username, password, avatarBg: randomColor });
+    const user = new User({ username: cleanUsername, password, avatarBg: randomColor });
     await user.save();
 
-    res.json({ success: true, username: user.username, avatarBg: user.avatarBg });
+    return res.json({ success: true, username: user.username, avatarBg: user.avatarBg });
   } catch (err) {
-    res.status(500).json({ error: "Serverda xatolik yuz berdi" });
+    console.error('Register Xatosi:', err);
+    return res.status(500).json({ error: "Serverda saqlashda xatolik yuz berdi" });
   }
 });
 
 app.post('/api/auth/login', async (req, res) => {
   try {
     const { username, password } = req.body;
-    const user = await User.findOne({ username, password });
-    if (!user) return res.status(400).json({ error: "Nik yoki parol noto'g'ri!" });
+    if (!username || !password) {
+      return res.status(400).json({ error: "Nik va parol kiritilishi shart!" });
+    }
 
-    res.json({ success: true, username: user.username, avatarBg: user.avatarBg });
+    const cleanUsername = username.trim().toLowerCase();
+    const user = await User.findOne({ username: cleanUsername, password });
+
+    if (!user) {
+      return res.status(400).json({ error: "Nik yoki parol noto'g'ri!" });
+    }
+
+    return res.json({ success: true, username: user.username, avatarBg: user.avatarBg });
   } catch (err) {
-    res.status(500).json({ error: "Serverda xatolik" });
+    console.error('Login Xatosi:', err);
+    return res.status(500).json({ error: "Server ichki xatosi" });
   }
 });
 
@@ -77,13 +100,11 @@ const io = socketIo(server, {
   maxHttpBufferSize: 1e8
 });
 
-// Online foydalanuvchilarni kuzatish: { socketId: username }
 const onlineUsers = new Map();
 
 io.on('connection', async (socket) => {
   console.log('Socket ulandi:', socket.id);
 
-  // Tarixni yuklash
   try {
     const history = await Message.find().sort({ createdAt: 1 }).limit(100);
     socket.emit('initMessages', history);
@@ -91,7 +112,6 @@ io.on('connection', async (socket) => {
     console.error('Tarix yuklashda xato:', err);
   }
 
-  // Foydalanuvchi online bo'lganda
   socket.on('userConnected', (username) => {
     if (username) {
       onlineUsers.set(socket.id, username);
@@ -100,7 +120,6 @@ io.on('connection', async (socket) => {
     }
   });
 
-  // Yangi xabar
   socket.on('sendMessage', async (data) => {
     try {
       const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -118,7 +137,6 @@ io.on('connection', async (socket) => {
     }
   });
 
-  // Xabarni tahrirlash (Edit)
   socket.on('editMessage', async ({ id, username, newContent }) => {
     try {
       const msg = await Message.findById(id);
@@ -132,7 +150,6 @@ io.on('connection', async (socket) => {
     }
   });
 
-  // Xabarni o'chirish (Delete)
   socket.on('deleteMessage', async ({ id, username }) => {
     try {
       const msg = await Message.findById(id);
@@ -145,7 +162,6 @@ io.on('connection', async (socket) => {
     }
   });
 
-  // Foydalanuvchi tarmoqdan uzilganda
   socket.on('disconnect', () => {
     onlineUsers.delete(socket.id);
     const activeList = Array.from(new Set(onlineUsers.values()));

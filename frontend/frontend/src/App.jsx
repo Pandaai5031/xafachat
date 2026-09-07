@@ -2,7 +2,11 @@ import React, { useState, useEffect, useRef } from 'react';
 import io from 'socket.io-client';
 
 const BACKEND_URL = 'https://xafachat.onrender.com';
-const socket = io(BACKEND_URL, { transports: ['websocket', 'polling'] });
+const socket = io(BACKEND_URL, { 
+  transports: ['websocket', 'polling'],
+  reconnection: true,
+  reconnectionAttempts: 5
+});
 
 export default function App() {
   // Auth state
@@ -11,6 +15,7 @@ export default function App() {
   const [usernameInput, setUsernameInput] = useState('');
   const [passwordInput, setPasswordInput] = useState('');
   const [authError, setAuthError] = useState('');
+  const [loading, setLoading] = useState(false);
 
   // Chat state
   const [chat, setChat] = useState([]);
@@ -22,7 +27,6 @@ export default function App() {
   // Recording state
   const [audioRecording, setAudioRecording] = useState(false);
   const [circleVideoRecording, setCircleVideoRecording] = useState(false);
-  const [videoStream, setVideoStream] = useState(null);
 
   // Design Theme Customization
   const [theme, setTheme] = useState(() => localStorage.getItem('xafa_theme') || 'purple');
@@ -40,7 +44,7 @@ export default function App() {
       socket.emit('userConnected', currentUser);
     }
 
-    socket.on('initMessages', (msgs) => setChat(msgs));
+    socket.on('initMessages', (msgs) => setChat(msgs || []));
 
     socket.on('message', (msg) => {
       setChat((prev) => [...prev, msg]);
@@ -57,7 +61,7 @@ export default function App() {
     });
 
     socket.on('onlineList', (users) => {
-      setOnlineList(users);
+      setOnlineList(users || []);
     });
 
     return () => {
@@ -76,19 +80,31 @@ export default function App() {
   // Auth funksiyalari
   const handleAuth = async (e) => {
     e.preventDefault();
+    if (!usernameInput.trim() || !passwordInput) {
+      setAuthError("Nik va parolni kiriting!");
+      return;
+    }
+
     setAuthError('');
+    setLoading(true);
+
     const endpoint = isLoginMode ? '/api/auth/login' : '/api/auth/register';
 
     try {
-      const res = await fetch(BACKEND_URL + endpoint, {
+      const res = await fetch(`${BACKEND_URL}${endpoint}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
         body: JSON.stringify({ username: usernameInput.trim(), password: passwordInput })
       });
+
       const data = await res.json();
 
       if (!res.ok) {
         setAuthError(data.error || 'Xatolik yuz berdi');
+        setLoading(false);
         return;
       }
 
@@ -96,7 +112,10 @@ export default function App() {
       setCurrentUser(data.username);
       socket.emit('userConnected', data.username);
     } catch (err) {
-      setAuthError("Server bilan ulanishda xatolik!");
+      console.error("Auth Request Error:", err);
+      setAuthError("Server bilan ulanishda xatolik! Render serveri uyqudan uyg'onayotgan bo'lishi mumkin (30 soniya kuting).");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -168,8 +187,11 @@ export default function App() {
   // Yumaloq Video Yozish (Krujok)
   const startCircleVideoRecord = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 300, height: 300 }, audio: true });
-      setVideoStream(stream);
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { width: 300, height: 300, facingMode: "user" }, 
+        audio: true 
+      });
+      
       if (videoPreviewRef.current) {
         videoPreviewRef.current.srcObject = stream;
       }
@@ -186,7 +208,6 @@ export default function App() {
         };
         reader.readAsDataURL(blob);
         stream.getTracks().forEach((track) => track.stop());
-        setVideoStream(null);
       };
 
       videoRecorderRef.current.start();
@@ -219,7 +240,7 @@ export default function App() {
 
   // O'chirish (Delete)
   const handleDelete = (id) => {
-    if (id && window.confirm("Xabarni o'chirib tashlamoqchimisiz?")) {
+    if (id && window.confirm("Haqiqatan ham ushbu xabarni o'chirib tashlamoqchimisiz?")) {
       socket.emit('deleteMessage', { id, username: currentUser });
     }
   };
@@ -239,12 +260,12 @@ export default function App() {
 
   const currentStyle = themeStyles[theme] || themeStyles.purple;
 
-  // Agar tizimga kirmagan bo'lsa (Login / Register Card)
+  // Login / Register oyna (Kirmagan bo'lsa)
   if (!currentUser) {
     return (
-      <div style={{ display: 'flex', height: '100vh', justifyContent: 'center', alignItems: 'center', background: currentStyle.bg }}>
+      <div style={{ display: 'flex', height: '100vh', justifyContent: 'center', alignItems: 'center', background: currentStyle.bg, fontFamily: 'Segoe UI, sans-serif' }}>
         <div style={authCardStyle}>
-          <div style={{ fontSize: '42px', marginBottom: '8px' }}>💬</div>
+          <div style={{ fontSize: '48px', marginBottom: '8px' }}>💬</div>
           <h2 style={{ margin: '0 0 6px 0', fontSize: '26px', fontWeight: '800', color: '#2d3436' }}>XAFA Chat</h2>
           <p style={{ margin: '0 0 20px 0', fontSize: '13px', color: '#636e72' }}>
             {isLoginMode ? 'Oʻz profilingizga kiring' : 'Yangi profil roʻyxatdan oʻtkazing'}
@@ -269,14 +290,14 @@ export default function App() {
               style={inputStyle}
               required
             />
-            <button type="submit" style={btnPrimaryStyle}>
-              {isLoginMode ? 'Kirish' : 'Roʻyxatdan oʻtish'}
+            <button type="submit" disabled={loading} style={{ ...btnPrimaryStyle, opacity: loading ? 0.7 : 1 }}>
+              {loading ? 'Kutib turing...' : (isLoginMode ? 'Kirish' : 'Roʻyxatdan oʻtish')}
             </button>
           </form>
 
           <button
             onClick={() => { setIsLoginMode(!isLoginMode); setAuthError(''); }}
-            style={{ background: 'none', border: 'none', color: '#6c5ce7', marginTop: '16px', cursor: 'pointer', fontSize: '13px', fontWeight: '600' }}
+            style={{ background: 'none', border: 'none', color: '#6c5ce7', marginTop: '18px', cursor: 'pointer', fontSize: '13px', fontWeight: '600' }}
           >
             {isLoginMode ? "Akkauntingiz yo'qmi? Ro'yxatdan o'ting" : "Akkauntingiz bormi? Kirish"}
           </button>
@@ -286,10 +307,10 @@ export default function App() {
   }
 
   return (
-    <div style={{ display: 'flex', height: '100vh', justifyContent: 'center', alignItems: 'center', background: currentStyle.bg }}>
+    <div style={{ display: 'flex', height: '100vh', justifyContent: 'center', alignItems: 'center', background: currentStyle.bg, fontFamily: 'Segoe UI, sans-serif' }}>
       <div style={chatContainerStyle}>
         
-        {/* Header */}
+        {/* Top Header */}
         <header style={{ ...headerStyle, background: currentStyle.headerBg }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <div style={avatarStyle}>{currentUser.charAt(0).toUpperCase()}</div>
@@ -303,12 +324,11 @@ export default function App() {
             </div>
           </div>
 
-          {/* Theme Selector va Logout */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <select
               value={theme}
               onChange={(e) => changeTheme(e.target.value)}
-              style={{ padding: '4px 8px', borderRadius: '12px', border: '1px solid #ccc', fontSize: '12px', outline: 'none' }}
+              style={{ padding: '6px 8px', borderRadius: '12px', border: '1px solid #ccc', fontSize: '12px', outline: 'none', cursor: 'pointer' }}
             >
               <option value="purple">💜 Binafsha</option>
               <option value="dark">🌙 Qorong'i</option>
@@ -319,28 +339,28 @@ export default function App() {
           </div>
         </header>
 
-        {/* Online User Strip */}
+        {/* Online Status Bar */}
         <div style={onlineStripStyle}>
-          <span style={{ fontSize: '11px', color: '#636e72', marginRight: '6px' }}>Hozir faol:</span>
+          <span style={{ fontSize: '11px', color: '#636e72', marginRight: '6px' }}>Faol foydalanuvchilar:</span>
           {onlineList.map((u) => (
             <span key={u} style={onlineBadgeStyle}>
-              <span style={{ color: '#00b894', marginRight: '3px' }}>●</span>{u}
+              <span style={{ color: '#00b894', marginRight: '4px' }}>●</span>{u}
             </span>
           ))}
         </div>
 
-        {/* Video Preview Modal (Krujok yozilayotganda) */}
+        {/* Krujok Yozish Preview Modal */}
         {circleVideoRecording && (
-          <div style={{ position: 'absolute', top: '80px', left: '50%', transform: 'translateX(-50%)', zIndex: 10, background: 'rgba(0,0,0,0.8)', padding: '10px', borderRadius: '50%' }}>
-            <video ref={videoPreviewRef} autoPlay muted style={{ width: '140px', height: '140px', borderRadius: '50%', objectFit: 'cover' }} />
+          <div style={{ position: 'absolute', top: '100px', left: '50%', transform: 'translateX(-50%)', zIndex: 10, background: 'rgba(0,0,0,0.85)', padding: '12px', borderRadius: '50%', boxShadow: '0 10px 25px rgba(0,0,0,0.5)' }}>
+            <video ref={videoPreviewRef} autoPlay muted style={{ width: '150px', height: '150px', borderRadius: '50%', objectFit: 'cover' }} />
           </div>
         )}
 
-        {/* Messages Body */}
+        {/* Chat Messages */}
         <div style={{ ...messageAreaStyle, background: theme === 'dark' ? '#121212' : '#f8f9fa' }}>
           {chat.map((msg) => {
-            const isMe = msg.username === currentUser;
-            const isUserOnline = onlineList.includes(msg.username);
+            const isMe = msg.username?.toLowerCase() === currentUser?.toLowerCase();
+            const isUserOnline = onlineList.some(u => u.toLowerCase() === msg.username?.toLowerCase());
 
             return (
               <div key={msg._id} style={{ display: 'flex', justifyContent: isMe ? 'flex-end' : 'flex-start', width: '100%' }}>
@@ -352,12 +372,12 @@ export default function App() {
                 }}>
 
                   {/* Header inside Bubble */}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', marginBottom: '4px' }}>
                     <span style={{ fontSize: '11px', fontWeight: '700', color: isMe ? '#dfe6e9' : '#6c5ce7' }}>
                       {msg.username} <span style={{ fontSize: '9px', color: isUserOnline ? '#00b894' : '#b2bec3' }}>({isUserOnline ? 'online' : 'offline'})</span>
                     </span>
 
-                    {/* Edit and Delete Buttons (Faqat o'zining xabarida ko'rinadi) */}
+                    {/* Edit / Delete Buttons (Faqat o'zining xabarida) */}
                     {isMe && (
                       <div style={{ display: 'flex', gap: '4px' }}>
                         {msg.type === 'text' && (
@@ -370,21 +390,21 @@ export default function App() {
 
                   {/* Message Content */}
                   {editingId === msg._id ? (
-                    <div style={{ display: 'flex', gap: '4px', marginTop: '4px' }}>
+                    <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
                       <input
                         type="text"
                         value={editText}
                         onChange={(e) => setEditText(e.target.value)}
-                        style={{ ...inputStyle, padding: '4px 8px', fontSize: '13px', margin: 0 }}
+                        style={{ ...inputStyle, padding: '4px 8px', fontSize: '13px', margin: 0, flex: 1 }}
                       />
-                      <button onClick={() => saveEdit(msg._id)} style={{ ...btnPrimaryStyle, padding: '4px 8px', fontSize: '12px' }}>✓</button>
+                      <button onClick={() => saveEdit(msg._id)} style={{ ...btnPrimaryStyle, padding: '4px 10px', fontSize: '12px' }}>✓</button>
                     </div>
                   ) : (
                     <>
-                      {msg.type === 'text' && <div style={{ wordBreak: 'break-word', fontSize: '14px' }}>{msg.content}</div>}
+                      {msg.type === 'text' && <div style={{ wordBreak: 'break-word', fontSize: '14px', lineHeight: '1.4' }}>{msg.content}</div>}
                       {msg.type === 'image' && <img src={msg.content} alt="Rasm" style={mediaStyle} />}
                       {msg.type === 'video' && <video src={msg.content} controls style={mediaStyle} />}
-                      {msg.type === 'audio' && <audio src={msg.content} controls style={{ maxWidth: '100%', height: '36px' }} />}
+                      {msg.type === 'audio' && <audio src={msg.content} controls style={{ maxWidth: '100%', height: '36px', marginTop: '4px' }} />}
                       {msg.type === 'circleVideo' && (
                         <video src={msg.content} controls autoPlay loop muted style={circleVideoStyle} />
                       )}
@@ -399,16 +419,16 @@ export default function App() {
           <div ref={chatEndRef} />
         </div>
 
-        {/* Input Controls Bar */}
+        {/* Input Bar */}
         <form onSubmit={sendTextMessage} style={{ ...inputBarStyle, background: theme === 'dark' ? '#1e272e' : '#ffffff' }}>
           
-          {/* File Upload Button */}
+          {/* File Button */}
           <label style={iconBtnStyle} title="Rasm/Video biriktirish">
             📁
             <input type="file" accept="image/*,video/*" onChange={handleFileUpload} style={{ display: 'none' }} />
           </label>
 
-          {/* Krujok Video Record Button */}
+          {/* Krujok Button */}
           <button
             type="button"
             onClick={circleVideoRecording ? stopCircleVideoRecord : startCircleVideoRecord}
@@ -418,7 +438,7 @@ export default function App() {
             {circleVideoRecording ? '⏹️' : '📹'}
           </button>
 
-          {/* Audio Record Button */}
+          {/* Ovozli Xabar Button */}
           <button
             type="button"
             onClick={audioRecording ? stopAudioRecord : startAudioRecord}
@@ -428,7 +448,7 @@ export default function App() {
             {audioRecording ? '⏹️' : '🎙️'}
           </button>
 
-          {/* Text input */}
+          {/* Text Input */}
           <input
             type="text"
             placeholder="Xabar yozing..."
@@ -437,7 +457,7 @@ export default function App() {
             style={{ ...inputStyle, flex: 1, margin: 0 }}
           />
 
-          {/* Send text button */}
+          {/* Send Button */}
           <button type="submit" style={sendBtnStyle}>🚀</button>
         </form>
 
@@ -454,14 +474,14 @@ const avatarStyle = { width: '38px', height: '38px', borderRadius: '50%', backgr
 const onlineStripStyle = { padding: '6px 16px', background: '#f8f9fa', borderBottom: '1px solid #eee', display: 'flex', alignItems: 'center', overflowX: 'auto', gap: '6px', whiteSpace: 'nowrap' };
 const onlineBadgeStyle = { background: '#eef2f5', padding: '2px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: '600', color: '#2d3436' };
 const messageAreaStyle = { flex: 1, padding: '14px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px' };
-const msgBubbleStyle = { padding: '8px 12px', maxWidth: '80%', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' };
-const mediaStyle = { maxWidth: '100%', borderRadius: '10px', marginTop: '4px', display: 'block' };
+const msgBubbleStyle = { padding: '10px 14px', maxWidth: '80%', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' };
+const mediaStyle = { maxWidth: '100%', borderRadius: '10px', marginTop: '6px', display: 'block' };
 const circleVideoStyle = { width: '160px', height: '160px', borderRadius: '50%', objectFit: 'cover', marginTop: '6px', border: '3px solid #ffffff' };
 const inputBarStyle = { padding: '10px 12px', display: 'flex', gap: '8px', alignItems: 'center', borderTop: '1px solid #eee' };
 const inputStyle = { padding: '10px 14px', borderRadius: '20px', border: '1px solid #dfe6e9', background: '#f1f2f6', outline: 'none', fontSize: '14px' };
 const btnPrimaryStyle = { padding: '12px', borderRadius: '20px', border: 'none', background: 'linear-gradient(45deg, #6c5ce7, #a29bfe)', color: '#fff', fontWeight: '700', cursor: 'pointer' };
-const iconBtnStyle = { padding: '8px', borderRadius: '50%', border: 'none', background: '#f1f2f6', cursor: 'pointer', fontSize: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '36px', height: '36px' };
+const iconBtnStyle = { padding: '8px', borderRadius: '50%', border: 'none', background: '#f1f2f6', cursor: 'pointer', fontSize: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '38px', height: '38px' };
 const sendBtnStyle = { padding: '8px 14px', borderRadius: '20px', border: 'none', background: 'linear-gradient(45deg, #6c5ce7, #a29bfe)', color: '#fff', cursor: 'pointer', fontSize: '16px' };
 const actionBtnStyle = { background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '12px', opacity: 0.8, padding: '2px' };
 const logoutBtnStyle = { background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '18px' };
-const errorStyle = { background: '#ffeaa7', color: '#d63031', padding: '8px', borderRadius: '12px', fontSize: '12px', marginBottom: '12px' };
+const errorStyle = { background: '#ffeaa7', color: '#d63031', padding: '10px', borderRadius: '12px', fontSize: '12px', marginBottom: '12px', lineHeight: '1.4' };
